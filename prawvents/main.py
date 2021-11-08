@@ -1,4 +1,5 @@
 import collections
+import inspect
 from functools import partial
 from typing import Any, Callable, Generator, Iterable, AsyncGenerator
 
@@ -109,7 +110,10 @@ class EventReddit(asyncpraw.Reddit):
                 return
             for f in funcs:
                 try:
-                    f(item)
+                    if inspect.iscoroutinefunction(f):
+                        await f(item)
+                    else:
+                        f(item)
                 except Exception as e:
                     self.handle_exception(f, e)
 
