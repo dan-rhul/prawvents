@@ -1,16 +1,15 @@
-from typing import Any, Callable, Generator, Iterable, Union
-import praw
+import asyncio
+from typing import Any, Callable, Generator, Iterable, AsyncGenerator
+import asyncpraw
 from functools import partial
 import collections
 
-from six import Iterator
-
-RStream = praw.models.util.stream_generator
+RStream = asyncpraw.models.util.stream_generator
 
 class RedditEventDecorator:
     """Decorator class for event handlers.
     """    
-    def __init__(self, reddit: praw.Reddit, stream: RStream, err_handler: Callable):
+    def __init__(self, reddit: asyncpraw.Reddit, stream: RStream, err_handler: Callable):
         """Initialise RedditEventDecorator.
 
         Args:
@@ -36,7 +35,7 @@ class RedditEventDecorator:
         return f
 
 
-class EventReddit(praw.Reddit):
+class EventReddit(asyncpraw.Reddit):
     """Main Reddit instance, subclass of [praw.Reddit](https://praw.readthedocs.io/en/latest/code_overview/reddit_instance.html).
 
     Args:
@@ -48,7 +47,7 @@ class EventReddit(praw.Reddit):
         super().__init__(*args, **kwargs)
         self.streams = collections.defaultdict(list)
 
-    def _every_second_generator(self, generator: Generator) -> Generator[Any, None, None]:
+    async def _every_second_generator(self, generator: AsyncGenerator) -> AsyncGenerator[Any, None]:
         """Return None in between original generator 
 
         Args:
@@ -57,7 +56,7 @@ class EventReddit(praw.Reddit):
         Yields:
             Generator[Any, None, None]: The new generator which will add a None after each element of the original.
         """        
-        for v in generator:
+        async for v in generator:
             yield v
             yield None
     
@@ -94,14 +93,14 @@ class EventReddit(praw.Reddit):
         else:
             raise e
 
-    def run_stream_till_none(self, stream: RStream, funcs: Iterable[Callable]) -> None:
+    async def run_stream_till_none(self, stream: RStream, funcs: Iterable[Callable]) -> None:
         """Runs a stream until none is returned
 
         Args:
             stream (RStream): The finalized stream to run.
             funcs (Iterable[Callable]): The functions which handle this stream.
         """        
-        for item in stream:
+        async for item in stream:
             if item is None:
                 return
             for f in funcs:
@@ -110,7 +109,7 @@ class EventReddit(praw.Reddit):
                 except Exception as e:
                     self.handle_exception(f, e)
 
-    def run_loop(self, interweave=True) -> None:
+    async def run_loop(self, interweave=True) -> None:
         """Run the event loop. If interweave is Truthy, events from multiple streams will be mixed to ensure a single high-traffic stream cant take up the entire event loop. This is highly recommended.
 
         Args:
@@ -119,22 +118,30 @@ class EventReddit(praw.Reddit):
         streams = {self._every_second_generator(s()) if interweave else s(): funcs for s, funcs in self.streams.items()}
         while True:
             for stream, funcs in streams.items():
-                self.run_stream_till_none(stream, funcs)
+                await self.run_stream_till_none(stream, funcs)
 
 if __name__ == "__main__":
-    from praw import reddit
+    async def main():
+        from asyncpraw import reddit
 
-    r = EventReddit(user_agent=f"ExampleBot for prawvents version (0.0.1) by /u/laundmo") # change the description and username!
+        r = None
+        try:
+            r = EventReddit(user_agent=f"ExampleBot for prawvents version (0.0.1) by /u/laundmo")  # change the description and username!
 
-    sub1 = r.subreddit("AskReddit")
-    sub2 = r.subreddit("pics")
+            sub1 = await r.subreddit("AskReddit")
+            sub2 = await r.subreddit("pics")
 
-    def handle_exception(e): # very dumb exception handler
-        print(e)
+            def handle_exception(e):  # very dumb exception handler
+                print(e)
 
-    @r.register_event(sub1.stream.submissions, err_handler=handle_exception, skip_existing=True)
-    @r.register_event(sub2.stream.submissions, err_handler=handle_exception)
-    def handle(submission: reddit.Submission):
-        print(submission.subreddit, submission.title)
+            @r.register_event(sub1.stream.submissions, err_handler=handle_exception, skip_existing=True)
+            @r.register_event(sub2.stream.submissions, err_handler=handle_exception)
+            def handle(submission: reddit.Submission):
+                print(submission.subreddit, submission.title)
 
-    r.run_loop()
+            await r.run_loop()
+        finally:
+            if r:
+                await r.close()
+
+    asyncio.run(main())

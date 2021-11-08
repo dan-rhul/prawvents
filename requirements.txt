@@ -1,1 +1,1 @@
-praw
+asyncpraw~=7.4.0
